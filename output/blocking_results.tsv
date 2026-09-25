@@ -1,0 +1,5 @@
+strategy	true_matches	recovered_matches	candidate_recall_%	avg_candidates	max_candidates
+exact_name	34567	7573	21.91	0.85	29
+compact_name	34567	7953	23.01	0.89	29
+address	34567	2944	8.52	0.15	4
+name_union	34567	7953	23.01	0.89	29

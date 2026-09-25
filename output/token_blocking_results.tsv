@@ -1,0 +1,11 @@
+source	strategy	true_matches	recovered_matches	candidate_recall_%	avg_candidates	median_candidates	max_candidates
+S2	prefix5+lasttoken	16752	13663	81.56	23378.34	32813.0	44902
+S2	prefix5+token	16752	14816	88.44	35326.57	41256.5	84793
+S2	prefix5+rare_token	16752	13588	81.11	280.66	53.0	3218
+S2	prefix5+address8+rare_token	16752	14886	88.86	314.46	74.0	3661
+S2	prefix5+firsttoken+address8+rare_token	16752	15042	89.79	354.86	201.0	4102
+S3	prefix5+lasttoken	17815	15011	84.26	25930.15	33096.0	53332
+S3	prefix5+token	17815	16365	91.86	38518.69	41396.0	96669
+S3	prefix5+rare_token	17815	14453	81.13	290.0	54.0	3153
+S3	prefix5+address8+rare_token	17815	16029	89.97	309.94	73.0	3210
+S3	prefix5+firsttoken+address8+rare_token	17815	16254	91.24	358.71	183.5	5040

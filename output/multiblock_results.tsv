@@ -1,0 +1,11 @@
+source	strategy	true_matches	recovered_matches	candidate_recall_%	avg_candidates	median_candidates	max_candidates
+S2	name_prefix_5	16752	12660	75.57	277.26	45.0	3173
+S2	name_prefix_5+name_first_token	16752	13151	78.5	318.09	153.0	4101
+S2	name_prefix_5+address_prefix_8	16752	14359	85.72	311.11	69.0	3661
+S2	name_prefix_5+name_first_token+address_prefix_8	16752	14622	87.29	351.9	197.0	4102
+S2	name_prefix_3+name_prefix_5+address_prefix_8	16752	14622	87.29	641.21	430.0	6491
+S3	name_prefix_5	17815	13099	73.53	286.57	47.0	3137
+S3	name_prefix_5+name_first_token	17815	13681	76.79	335.76	147.0	5039
+S3	name_prefix_5+address_prefix_8	17815	15342	86.12	306.58	67.0	3210
+S3	name_prefix_5+name_first_token+address_prefix_8	17815	15689	88.07	355.73	181.0	5040
+S3	name_prefix_3+name_prefix_5+address_prefix_8	17815	15663	87.92	656.78	485.0	5749
