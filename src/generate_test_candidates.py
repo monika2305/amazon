@@ -4,7 +4,7 @@ import unicodedata
 import os
 
 
-print("\n===== STEP 23: FAST TEST CANDIDATE GENERATION =====\n")
+print("\n===== STEP 23: MEMORY-SAFE TEST CANDIDATE GENERATION =====\n")
 
 
 # ============================================================
@@ -19,7 +19,8 @@ S3_FILE = f"{TEST_DIR}/test_source3.tsv"
 
 OUTPUT_FILE = "output/candidate_pairs.tsv"
 
-S1_CHUNK_SIZE = 100000
+# Much smaller than before.
+S1_CHUNK_SIZE = 5000
 
 
 # ============================================================
@@ -53,15 +54,6 @@ def normalize_series(series):
     )
 
 
-def compact_series(series):
-
-    return series.str.replace(
-        " ",
-        "",
-        regex=False
-    )
-
-
 def prepare_source(df):
 
     df = df[
@@ -85,12 +77,22 @@ def prepare_source(df):
         df["business_address"]
     )
 
-    df["name_compact"] = compact_series(
+    df["name_compact"] = (
         df["name_norm"]
+        .str.replace(
+            " ",
+            "",
+            regex=False
+        )
     )
 
-    df["address_compact"] = compact_series(
+    df["address_compact"] = (
         df["address_norm"]
+        .str.replace(
+            " ",
+            "",
+            regex=False
+        )
     )
 
     df["name_prefix_5"] = (
@@ -107,7 +109,7 @@ def prepare_source(df):
 
 
 # ============================================================
-# LOAD S2 / S3
+# LOAD TEST S2
 # ============================================================
 
 print("Loading Test S2...")
@@ -115,7 +117,13 @@ print("Loading Test S2...")
 s2 = pd.read_csv(
     S2_FILE,
     sep="\t",
-    dtype=str
+    dtype=str,
+    usecols=[
+        "entity_id",
+        "business_name",
+        "business_address",
+        "country"
+    ]
 )
 
 print(
@@ -127,12 +135,22 @@ print("Normalizing S2...")
 s2 = prepare_source(s2)
 
 
+# ============================================================
+# LOAD TEST S3
+# ============================================================
+
 print("\nLoading Test S3...")
 
 s3 = pd.read_csv(
     S3_FILE,
     sep="\t",
-    dtype=str
+    dtype=str,
+    usecols=[
+        "entity_id",
+        "business_name",
+        "business_address",
+        "country"
+    ]
 )
 
 print(
@@ -145,114 +163,89 @@ s3 = prepare_source(s3)
 
 
 # ============================================================
-# KEEP ONLY BLOCKING COLUMNS
+# CREATE SMALL BLOCKING TABLES
 # ============================================================
 
-s2_blocks = s2[
+print("\nPreparing blocking tables...")
+
+
+s2_name = s2[
     [
         "entity_id",
         "country_norm",
-        "name_prefix_5",
-        "address_prefix_8"
+        "name_prefix_5"
     ]
-].copy()
-
-s3_blocks = s3[
-    [
-        "entity_id",
-        "country_norm",
-        "name_prefix_5",
-        "address_prefix_8"
-    ]
-].copy()
-
-
-s2_blocks = s2_blocks.rename(
+].rename(
     columns={
         "entity_id": "candidate_entity_id"
     }
 )
 
-s3_blocks = s3_blocks.rename(
+s2_name = s2_name[
+    (s2_name["country_norm"] != "")
+    &
+    (s2_name["name_prefix_5"] != "")
+]
+
+
+s2_address = s2[
+    [
+        "entity_id",
+        "country_norm",
+        "address_prefix_8"
+    ]
+].rename(
     columns={
         "entity_id": "candidate_entity_id"
     }
 )
 
-
-# ============================================================
-# REMOVE EMPTY BLOCK KEYS
-# ============================================================
-
-s2_name = s2_blocks[
-    (
-        s2_blocks["country_norm"] != ""
-    )
+s2_address = s2_address[
+    (s2_address["country_norm"] != "")
     &
-    (
-        s2_blocks["name_prefix_5"] != ""
-    )
-][
+    (s2_address["address_prefix_8"] != "")
+]
+
+
+s3_name = s3[
     [
-        "candidate_entity_id",
+        "entity_id",
         "country_norm",
         "name_prefix_5"
     ]
-].drop_duplicates()
+].rename(
+    columns={
+        "entity_id": "candidate_entity_id"
+    }
+)
 
-
-s2_address = s2_blocks[
-    (
-        s2_blocks["country_norm"] != ""
-    )
+s3_name = s3_name[
+    (s3_name["country_norm"] != "")
     &
-    (
-        s2_blocks["address_prefix_8"] != ""
-    )
-][
+    (s3_name["name_prefix_5"] != "")
+]
+
+
+s3_address = s3[
     [
-        "candidate_entity_id",
+        "entity_id",
         "country_norm",
         "address_prefix_8"
     ]
-].drop_duplicates()
+].rename(
+    columns={
+        "entity_id": "candidate_entity_id"
+    }
+)
 
-
-s3_name = s3_blocks[
-    (
-        s3_blocks["country_norm"] != ""
-    )
+s3_address = s3_address[
+    (s3_address["country_norm"] != "")
     &
-    (
-        s3_blocks["name_prefix_5"] != ""
-    )
-][
-    [
-        "candidate_entity_id",
-        "country_norm",
-        "name_prefix_5"
-    ]
-].drop_duplicates()
+    (s3_address["address_prefix_8"] != "")
+]
 
 
-s3_address = s3_blocks[
-    (
-        s3_blocks["country_norm"] != ""
-    )
-    &
-    (
-        s3_blocks["address_prefix_8"] != ""
-    )
-][
-    [
-        "candidate_entity_id",
-        "country_norm",
-        "address_prefix_8"
-    ]
-].drop_duplicates()
-
-
-print("\nBlocking tables prepared.")
+print("Blocking tables ready.")
 
 
 # ============================================================
@@ -270,17 +263,17 @@ if os.path.exists(
 
 first_write = True
 
-total_candidates = 0
-
 processed_s1 = 0
+
+total_pairs = 0
 
 
 # ============================================================
-# PROCESS S1 IN CHUNKS
+# PROCESS S1 IN SMALL CHUNKS
 # ============================================================
 
 print(
-    "\nGenerating candidate pairs..."
+    "\nGenerating candidates in small chunks..."
 )
 
 
@@ -288,16 +281,17 @@ for s1_chunk in pd.read_csv(
     S1_FILE,
     sep="\t",
     dtype=str,
+    usecols=[
+        "entity_id",
+        "business_name",
+        "business_address",
+        "country"
+    ],
     chunksize=S1_CHUNK_SIZE
 ):
 
-    processed_s1 += len(
-        s1_chunk
-    )
-
-
     # --------------------------------------------------------
-    # Normalize S1
+    # Normalize only this S1 chunk
     # --------------------------------------------------------
 
     s1_chunk = prepare_source(
@@ -312,14 +306,14 @@ for s1_chunk in pd.read_csv(
             "name_prefix_5",
             "address_prefix_8"
         ]
-    ].copy()
+    ]
 
 
     # ========================================================
-    # S2 NAME BLOCK
+    # S2 NAME
     # ========================================================
 
-    name_pairs_s2 = s1_blocks.merge(
+    pairs = s1_blocks.merge(
         s2_name,
         on=[
             "country_norm",
@@ -333,16 +327,38 @@ for s1_chunk in pd.read_csv(
         ]
     ]
 
-    name_pairs_s2[
-        "candidate_source"
-    ] = "S2"
+    if not pairs.empty:
+
+        pairs = pairs.rename(
+            columns={
+                "entity_id":
+                    "source1_entity_id"
+            }
+        )
+
+        pairs["candidate_source"] = "S2"
+
+        pairs.to_csv(
+            OUTPUT_FILE,
+            sep="\t",
+            index=False,
+            mode="w" if first_write else "a",
+            header=first_write
+        )
+
+        first_write = False
+
+        total_pairs += len(pairs)
+
+
+    del pairs
 
 
     # ========================================================
-    # S2 ADDRESS BLOCK
+    # S2 ADDRESS
     # ========================================================
 
-    address_pairs_s2 = s1_blocks.merge(
+    pairs = s1_blocks.merge(
         s2_address,
         on=[
             "country_norm",
@@ -356,16 +372,36 @@ for s1_chunk in pd.read_csv(
         ]
     ]
 
-    address_pairs_s2[
-        "candidate_source"
-    ] = "S2"
+    if not pairs.empty:
+
+        pairs = pairs.rename(
+            columns={
+                "entity_id":
+                    "source1_entity_id"
+            }
+        )
+
+        pairs["candidate_source"] = "S2"
+
+        pairs.to_csv(
+            OUTPUT_FILE,
+            sep="\t",
+            index=False,
+            mode="a",
+            header=False
+        )
+
+        total_pairs += len(pairs)
+
+
+    del pairs
 
 
     # ========================================================
-    # S3 NAME BLOCK
+    # S3 NAME
     # ========================================================
 
-    name_pairs_s3 = s1_blocks.merge(
+    pairs = s1_blocks.merge(
         s3_name,
         on=[
             "country_norm",
@@ -379,16 +415,36 @@ for s1_chunk in pd.read_csv(
         ]
     ]
 
-    name_pairs_s3[
-        "candidate_source"
-    ] = "S3"
+    if not pairs.empty:
+
+        pairs = pairs.rename(
+            columns={
+                "entity_id":
+                    "source1_entity_id"
+            }
+        )
+
+        pairs["candidate_source"] = "S3"
+
+        pairs.to_csv(
+            OUTPUT_FILE,
+            sep="\t",
+            index=False,
+            mode="a",
+            header=False
+        )
+
+        total_pairs += len(pairs)
+
+
+    del pairs
 
 
     # ========================================================
-    # S3 ADDRESS BLOCK
+    # S3 ADDRESS
     # ========================================================
 
-    address_pairs_s3 = s1_blocks.merge(
+    pairs = s1_blocks.merge(
         s3_address,
         on=[
             "country_norm",
@@ -402,84 +458,58 @@ for s1_chunk in pd.read_csv(
         ]
     ]
 
-    address_pairs_s3[
-        "candidate_source"
-    ] = "S3"
+    if not pairs.empty:
+
+        pairs = pairs.rename(
+            columns={
+                "entity_id":
+                    "source1_entity_id"
+            }
+        )
+
+        pairs["candidate_source"] = "S3"
+
+        pairs.to_csv(
+            OUTPUT_FILE,
+            sep="\t",
+            index=False,
+            mode="a",
+            header=False
+        )
+
+        total_pairs += len(pairs)
 
 
-    # ========================================================
-    # COMBINE
-    # ========================================================
-
-    chunk_pairs = pd.concat(
-        [
-            name_pairs_s2,
-            address_pairs_s2,
-            name_pairs_s3,
-            address_pairs_s3
-        ],
-        ignore_index=True
-    )
-
-
-    # Rename S1 ID
-    chunk_pairs = chunk_pairs.rename(
-        columns={
-            "entity_id":
-                "source1_entity_id"
-        }
-    )
-
-
-    # --------------------------------------------------------
-    # Remove duplicate candidate pairs
-    # --------------------------------------------------------
-
-    chunk_pairs = chunk_pairs.drop_duplicates(
-        subset=[
-            "source1_entity_id",
-            "candidate_entity_id"
-        ]
-    )
-
-
-    total_candidates += len(
-        chunk_pairs
-    )
-
-
-    # ========================================================
-    # WRITE
-    # ========================================================
-
-    chunk_pairs.to_csv(
-        OUTPUT_FILE,
-        sep="\t",
-        index=False,
-        mode="w" if first_write else "a",
-        header=first_write
-    )
-
-    first_write = False
+    del pairs
 
 
     # ========================================================
     # PROGRESS
     # ========================================================
 
-    print(
-        f"Processed S1: "
-        f"{processed_s1:,}"
+    processed_s1 += len(
+        s1_chunk
     )
 
-    print(
-        f"Candidates generated so far: "
-        f"{total_candidates:,}"
-    )
+    if (
+        processed_s1 % 50000 == 0
+        or processed_s1 == len(s1)
+    ):
+
+        print(
+            f"Processed S1: "
+            f"{processed_s1:,} / "
+            f"{len(s1):,}"
+        )
+
+        print(
+            f"Candidate rows written: "
+            f"{total_pairs:,}"
+        )
 
 
 # ============================================================
-# FINAL RESULTS
+# COMPLETE
 # ============================================================
 
 print(
@@ -492,21 +522,12 @@ print(
 )
 
 print(
-    f"Candidate pairs generated: "
-    f"{total_candidates:,}"
+    f"Candidate rows generated: "
+    f"{total_pairs:,}"
 )
 
 print(
-    f"Average candidates/S1: "
-    f"{total_candidates / processed_s1:.2f}"
-)
-
-print(
-    f"\nSaved:"
-)
-
-print(
-    OUTPUT_FILE
+    f"\nSaved: {OUTPUT_FILE}"
 )
 
 print(
